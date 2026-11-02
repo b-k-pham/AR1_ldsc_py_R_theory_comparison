@@ -408,7 +408,8 @@ class run_simulations:
             np.random.seed(seed_id)
         res_dict = dict()
         start = time.perf_counter()
-        X,b = self.data_gen.gen_X(realistic = self.realistic)
+        X,b,f,_ = self.my_data_gen.gen_X(realistic = self.realistic,debug = True)
+        Cf = np.mean(f**2/(1+f**2))
         y = self.data_gen.gen_y(X,b)
         
         
@@ -445,10 +446,32 @@ class run_simulations:
         
         start = time.perf_counter()
         
+        # VANILLA LDSC
         h2_ldsc_reg,se_ldsc_reg,icpt_ldsc_reg,weights = sims.do_ldsc()
+
+        # LDSC FIXED
         h2_ldsc_fixed,se_ldsc_fixed,icpt_ldsc_fixed,weights_fixed = sims_fixed.do_ldsc()
         
-        
+        # NO WEIGHTING IN LDSC
+        ldsc_weights_ones = np.ones(m).reshape(-1,1)
+        sims_no_weighting = do_analysis(my_data_gen,X_tilde,u2,s2,ldscores,ldsc_weights_ones,num_weight_iteration = 0,calc_mu_hat_2_fast = True,no_weights = True)
+        h2_ldsc_nw,se_ldsc_nw,icpt_ldsc_nw,weights_ldsc_nw = sims_no_weighting.do_ldsc()
+ 
+        # NO WEIGHTING LDSC FIXED
+        ldsc_weights_ones = np.ones(m).reshape(-1,1)
+        sims_no_weighting = do_analysis(my_data_gen,X_tilde,u2,s2,ldscores,ldsc_weights_ones,intercept = 1,num_weight_iteration = 0,calc_mu_hat_2_fast = True,no_weights = True)
+        h2_ldsc_fixed_nw,se_ldsc_fixed_nw,icpt_ldsc_fixed_nw,weights_fixed_nw = sims_no_weighting.do_ldsc()
+
+
+        # NO TWOSTEP IN LDSC
+        sims_no_ts = do_analysis(my_data_gen,X_tilde,u2,s2,ldscores,ldsc_reg_weights,calc_mu_hat_2_fast = True,twostep = np.inf,return_step1_only = True)
+        h2_ldsc_nts,se_ldsc_nts,icpt_ldsc_nts,weights_ldsc_nts = sims_no_ts.do_ldsc()
+
+        # NO WEIGHTING AND NO TWOSTEP IN LDSC
+        sims_no_weighting_and_no_ts = do_analysis(my_data_gen,X_tilde,u2,s2,ldscores,ldsc_weights_ones,num_weight_iteration = 0,calc_mu_hat_2_fast = True,no_weights = True,twostep = np.inf,return_step1_only = True)
+        h2_ldsc_nwts,se_ldsc_nwts,icpt_ldsc_nwts,weights_ldsc_nwts = sims_no_weighting_and_no_ts.do_ldsc()
+
+
         ### bias decomposition
         S1 = np.ones(int(self.data_gen.n/2)) * self.data_gen.sigma_s
         S2 = np.ones(int(self.data_gen.n/2)) * -self.data_gen.sigma_s
@@ -511,31 +534,42 @@ class run_simulations:
             end = time.perf_counter()
             #tqdm.write('time to do GCTA: {time}'.format(time = str(end - start)))
 
-        if self.debug: # if debug flag is on, save objects. For example, I want to save ldscores and u2.
-            with open('sim_debug_data/X_y_b_seed{seed_num}.npy'.format(seed_num = seed_id), 'wb') as f:
-                np.save(f, X)
-                np.save(f, y)
-                np.save(f, b)
-            with open('sim_debug_data/X_tilde_y_tilde_seed{seed_num}.npy'.format(seed_num = seed_id), 'wb') as f:
-                np.save(f, X_tilde)
-                np.save(f, y_tilde)
-            with open('sim_debug_data/ldscores_u2_seed{seed_num}.npy'.format(seed_num = seed_id), 'wb') as f:
-                np.save(f, ldscores)
-                np.save(f, u2)
+        # if self.debug: # if debug flag is on, save objects. For example, I want to save ldscores and u2.
+            # with open('sim_debug_data/X_y_b_seed{seed_num}.npy'.format(seed_num = seed_id), 'wb') as f:
+                # np.save(f, X)
+                # np.save(f, y)
+                # np.save(f, b)
+            # with open('sim_debug_data/X_tilde_y_tilde_seed{seed_num}.npy'.format(seed_num = seed_id), 'wb') as f:
+                # np.save(f, X_tilde)
+                # np.save(f, y_tilde)
+            # with open('sim_debug_data/ldscores_u2_seed{seed_num}.npy'.format(seed_num = seed_id), 'wb') as f:
+                # np.save(f, ldscores)
+                # np.save(f, u2)
             
         if self.run_gcta:
             res_dict['h2_gcta'] = GCTA_res['h2_est']
             if self.debug:
                 res_dict['gcta_iters'] = GCTA_res['num_iters']
         res_dict['h2_gwash'] = gwash_res['gwash']
-        res_dict['h2_ldsc_reg'] = h2_ldsc_reg
+        res_dict['h2_ldsc_reg'] = h2_ldsc_reg # regular LDSC
         res_dict['icpt_ldsc_reg'] = icpt_ldsc_reg
-        res_dict['h2_ldsc_fixed'] = h2_ldsc_fixed
-        res_dict['h2_ldsc_new_fixed'] = h2_ldsc_new_fixed
+        res_dict['h2_ldsc_fixed'] = h2_ldsc_fixed # LDSC with intercept constrained to 1
+        res_dict['h2_ldsc_nw'] = h2_ldsc_nw # LDSC with no weighting
+        res_dict['icpt_ldsc_nw'] = icpt_ldsc_nw
+        res_dict['h2_ldsc_fixed_nw'] = h2_ldsc_fixed_nw # LDSC with intecept constrained to 1 with no weighting
+        res_dict['h2_ldsc_nts'] = h2_ldsc_nts # LDSC with no two-step
+        res_dict['icpt_ldsc_nts'] = icpt_ldsc_nts
+        res_dict['h2_ldsc_nwts'] = h2_ldsc_nwts # LDSC with no weighting and no two-step
+        res_dict['icpt_ldsc_nwts'] = icpt_ldsc_nwts
+        res_dict['h2_ldsc_new_fixed'] = h2_ldsc_new_fixed #if somehow you got rid of the bias term and then do LDSC with intercept constrained to 1.
         res_dict['h2_samp'] = h2_samp_fve
         res_dict['h2_gwash_sample_theoretical_se'] = GWASH_se_sample_theoretical
         res_dict['h2_ldsc_reg_jackknife_se'] = se_ldsc_reg # since it is an estimate of the variance component, I can just square the SE to get the variance apparently
         res_dict['h2_ldsc_fixed_jackknife_se'] = se_ldsc_fixed
+        res_dict['se_ldsc_nw'] = se_ldsc_nw
+        res_dict['se_ldsc_fixed_nw'] = se_ldsc_fixed_nw
+        res_dict['se_ldsc_nts'] = se_ldsc_nts
+        res_dict['se_ldsc_nwts'] = se_ldsc_nwts
         res_dict['h2_ldsc_new_fixed_jackknife_se'] = se_ldsc_new_fixed
         logging.info('Finished simulation {i}'.format(i = i))
         return res_dict
