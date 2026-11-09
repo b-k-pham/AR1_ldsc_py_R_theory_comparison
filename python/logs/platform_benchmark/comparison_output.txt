@@ -1,0 +1,6 @@
+a: python/logs/platform_benchmark/windows_n1000_m2000_Fst0001.csv (101 rows)
+b: python/logs/platform_benchmark/unix_n1000_m2000_Fst0001.csv (101 rows)
+header match: True
+max abs diff: 1.502e-12
+max rel diff: 2.820e-10  (row 67, col icpt_ldsc_nwts)
+PASS: outputs match within tolerance (rel diff < 1e-06)

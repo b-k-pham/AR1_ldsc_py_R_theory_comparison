@@ -4,7 +4,7 @@ import scipy
 import scipy.sparse as sp
 import scipy.io as sio
 import scipy.stats as stats
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 
 
 import os

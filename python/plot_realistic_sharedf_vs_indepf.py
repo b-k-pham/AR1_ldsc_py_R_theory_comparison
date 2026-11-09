@@ -31,7 +31,10 @@ REPO_ROOT = PROJECT_ROOT.parent
 DATA_DIR = REPO_ROOT / "data"
 FIGURES_DIR = REPO_ROOT / "figures"
 
-FST_LIST = [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
+# Per feedback: only F_ST 0-0.1 is relevant, so the "full range" panel now stops at 0.1
+# (0.1-0.5 dropped entirely) and the zoomed panel goes further in, to 0-0.01 in 0.001 steps.
+FST_FINE = [0, 0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.01]
+FST_FULL = [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]
 H2_POP = 0.3
 
 SCENARIOS = {
@@ -52,15 +55,17 @@ ESTIMATOR_COLS = {
 
 
 def fst_label(fst):
-    return str(fst).replace(".", "")
+    # matches driver scripts: Fst = np.float64(sys.argv[1]); str(Fst).replace(".", "") -
+    # plain str(fst) gives "0" for Fst=0 instead of the actual "00" filename label.
+    return str(np.float64(fst)).replace(".", "")
 
 
-def load_summary(dirname, n, m):
+def load_summary(dirname, n, m, fst_list):
     """Read every available Fst CSV in a data/<dirname>/ folder and return one row per
     Fst with mean and standard-error-of-the-mean for each estimator in ESTIMATOR_COLS,
     plus the mean theoretical h2."""
     rows = []
-    for fst in FST_LIST:
+    for fst in fst_list:
         fp = DATA_DIR / dirname / "realisticLD_n{n}_m{m}_Fst{lbl}_sigmas03_h2pop03.csv".format(n=n, m=m, lbl=fst_label(fst))
         if not fp.exists():
             continue
@@ -76,12 +81,12 @@ def load_summary(dirname, n, m):
     return pd.DataFrame(rows)
 
 
-def build_long_df(scenario_dict, n, m):
+def build_long_df(scenario_dict, n, m, fst_list):
     """scenario_dict: {"shared f": dirname, "independent f": dirname} -> long-format
     DataFrame with columns [Fst, f_sharing, estimator, mean_h2, se_h2, h2_theory_mean]."""
     pieces = []
     for f_sharing_label, dirname in scenario_dict.items():
-        summary = load_summary(dirname, n, m)
+        summary = load_summary(dirname, n, m, fst_list)
         if summary.empty:
             print(f"warning: no data found yet in data/{dirname}/")
             continue
@@ -97,25 +102,31 @@ def build_long_df(scenario_dict, n, m):
 
 
 FOCUS_ESTIMATOR = "LDSC (free intercept)"
-ZOOM_FST_MAX = 0.05
 
 
-def make_plot(long_df, title, out_path, n, m, focus_estimator=FOCUS_ESTIMATOR, zoom_fst_max=ZOOM_FST_MAX):
+def make_plot(fine_long_df, full_long_df, title, out_path, n, m, focus_estimator=FOCUS_ESTIMATOR):
     colors = {"shared f": "#1b9e77", "independent f": "#d95f02"}
-    sub_all = long_df[long_df["estimator"] == focus_estimator].sort_values("Fst")
+    fine_sub = fine_long_df[fine_long_df["estimator"] == focus_estimator].sort_values("Fst")
+    full_sub = full_long_df[full_long_df["estimator"] == focus_estimator].sort_values("Fst")
 
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
     panel_specs = [
-        (axes[0], sub_all[sub_all["Fst"] <= zoom_fst_max], f"Zoomed: F_ST 0 to {zoom_fst_max}"),
-        (axes[1], sub_all, "Full range: F_ST 0 to 0.5"),
+        (axes[0], fine_sub, "Zoomed: F_ST 0 to 0.01", 0.001),
+        (axes[1], full_sub, "F_ST 0 to 0.1", 0.01),
     ]
 
-    for ax, sub, panel_title in panel_specs:
+    for ax, sub, panel_title, tick_step in panel_specs:
         ax.axhline(H2_POP, linestyle="--", color="grey", linewidth=1, label="h2_pop")
         # y-limit covers both the observed estimates AND the theory line (no clipping) for
         # every Fst value shown in this panel.
         observed_max = (sub["mean_h2"] + 1.96 * sub["se_h2"]).max() if not sub.empty else 1
-        theory_max = sub["h2_theory_mean"].max() if not sub.empty else observed_max
+        # At Fst=0 (f fixed at 0), C_f = mean(f^2/(1+f^2)) = 0, so the theory formula's
+        # sigma_s^2/C_f term divides by zero and is +inf - a formula artifact at that one
+        # point (no real stratification signal when f=0), not a real divergence. Excluded
+        # from the y-limit so it doesn't blow up the axis; the point itself just doesn't
+        # render for that one Fst value.
+        finite_theory = sub["h2_theory_mean"][np.isfinite(sub["h2_theory_mean"])] if not sub.empty else pd.Series([], dtype=float)
+        theory_max = finite_theory.max() if not finite_theory.empty else observed_max
         panel_max = max(observed_max, theory_max)
         for f_sharing, color in colors.items():
             s = sub[sub["f_sharing"] == f_sharing]
@@ -138,8 +149,8 @@ def make_plot(long_df, title, out_path, n, m, focus_estimator=FOCUS_ESTIMATOR, z
         ax.set_xlabel("F_ST")
         ax.set_ylabel("Estimated h2")
         ax.set_title(panel_title)
-        if panel_title.startswith("Zoomed"):
-            ax.set_xticks(np.arange(0, zoom_fst_max + 1e-9, 0.01))
+        ax.set_xticks(np.arange(0, sub["Fst"].max() + 1e-9, tick_step) if not sub.empty else [0])
+        ax.tick_params(axis="x", labelrotation=45)
         ax.legend(title="Stratification vector f", fontsize=8)
 
     fig.suptitle(f"{title} ({focus_estimator})\nn={n}, m={m}")
@@ -156,19 +167,21 @@ def main():
     m = n * 2
     suffix = f"_n{n}_m{m}"
 
-    noref_long = build_long_df(SCENARIOS["no ref panel"], n, m)
-    if not noref_long.empty:
+    noref_fine = build_long_df(SCENARIOS["no ref panel"], n, m, FST_FINE)
+    noref_full = build_long_df(SCENARIOS["no ref panel"], n, m, FST_FULL)
+    if not noref_fine.empty and not noref_full.empty:
         make_plot(
-            noref_long,
+            noref_fine, noref_full,
             "Real chr1 LD, no reference panel: shared vs. independent f",
             FIGURES_DIR / f"h2_by_fst_realistic_noref_sharedf_vs_indepf{suffix}.png",
             n, m,
         )
 
-    refpanel_long = build_long_df(SCENARIOS["ref panel"], n, m)
-    if not refpanel_long.empty:
+    refpanel_fine = build_long_df(SCENARIOS["ref panel"], n, m, FST_FINE)
+    refpanel_full = build_long_df(SCENARIOS["ref panel"], n, m, FST_FULL)
+    if not refpanel_fine.empty and not refpanel_full.empty:
         make_plot(
-            refpanel_long,
+            refpanel_fine, refpanel_full,
             "Real chr1 LD, with reference panel: shared vs. independent f",
             FIGURES_DIR / f"h2_by_fst_realistic_refpanel_fixedf_vs_indepf{suffix}.png",
             n, m,

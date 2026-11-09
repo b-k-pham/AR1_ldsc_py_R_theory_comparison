@@ -4,11 +4,13 @@ import scipy
 import scipy.sparse as sp
 import scipy.io as sio
 import scipy.stats as stats
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 
 
 import os
-os.environ["R_HOME"] = f"{os.environ['CONDA_PREFIX']}\\Lib\\R"
+import sys
+if sys.platform == 'win32':
+    os.environ["R_HOME"] = f"{os.environ['CONDA_PREFIX']}\\Lib\\R"
 
 
 from sklearn.linear_model import LinearRegression
